@@ -23,8 +23,8 @@
 async function load() {
   const r = await fetch("/api/todos");
   const data = await r.json();
-  document.getElementById("inst").textContent = "Svar från API-container: " + data.instance;
-  const ul = document.getElementById("list");
+  /** @type {HTMLElement} */ (document.getElementById("inst")).textContent = "Svar från API-container: " + data.instance;
+  const ul = /** @type {HTMLElement} */ (document.getElementById("list"));
   ul.innerHTML = "";
   for (const t of data.todos) {
     const li = document.createElement("li");
@@ -39,9 +39,9 @@ async function load() {
     ul.append(li);
   }
 }
-document.getElementById("f").onsubmit = async (e) => {
+/** @type {HTMLFormElement} */ (document.getElementById("f")).onsubmit = async (e) => {
   e.preventDefault();
-  const i = document.getElementById("t");
+  const i = /** @type {HTMLInputElement} */ (document.getElementById("t"));
   await fetch("/api/todos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: i.value }) });
   i.value = "";
   load();
