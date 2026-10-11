@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Todo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 2rem auto; padding: 0 1rem; }
+    li { display: flex; gap: .5rem; align-items: center; padding: .25rem 0; }
+    li.done span { text-decoration: line-through; color: #888; }
+    li span { flex: 1; cursor: pointer; }
+    form { display: flex; gap: .5rem; }
+    input { flex: 1; padding: .4rem; }
+    small { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>Todo</h1>
+  <form id="f"><input id="t" placeholder="Ny uppgift" required><button>Lägg till</button></form>
+  <ul id="list"></ul>
+  <small id="inst"></small>
+<script>
+async function load() {
+  const r = await fetch("/api/todos");
+  const data = await r.json();
+  document.getElementById("inst").textContent = "Svar från API-container: " + data.instance;
+  const ul = document.getElementById("list");
+  ul.innerHTML = "";
+  for (const t of data.todos) {
+    const li = document.createElement("li");
+    if (t.done) li.className = "done";
+    const s = document.createElement("span");
+    s.textContent = t.title;
+    s.onclick = async () => { await fetch("/api/todos/" + t.id, { method: "PATCH" }); load(); };
+    const b = document.createElement("button");
+    b.textContent = "✕";
+    b.onclick = async () => { await fetch("/api/todos/" + t.id, { method: "DELETE" }); load(); };
+    li.append(s, b);
+    ul.append(li);
+  }
+}
+document.getElementById("f").onsubmit = async (e) => {
+  e.preventDefault();
+  const i = document.getElementById("t");
+  await fetch("/api/todos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: i.value }) });
+  i.value = "";
+  load();
+};
+load();
+</script>
+</body>
+</html>
