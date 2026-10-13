@@ -1,129 +1,129 @@
-# Todo – containeriserad microservice
+# Todo – containerized microservice
 
-En enkel todo-app uppdelad i tre containrar: en nginx-frontend, ett Node.js/Express-API och en PostgreSQL-databas. Allt startas med Docker Compose och kan köras lokalt eller på en molnserver.
+A simple todo app split into three containers: an nginx frontend, a Node.js/Express API and a PostgreSQL database. Everything starts with Docker Compose and runs locally or on a cloud server.
 
-## Funktioner
+## Features
 
-- **Tre tjänster:** `web` (nginx), `api` (Node.js) och `db` (PostgreSQL 16)
-- **Nätverksisolering:** frontenden kan inte nå databasen, utan bara API:t kan det
-- **Skalbart API:** kör flera API-instanser med `--scale`, och nginx fördelar trafiken
-- **Ingen container kör som root**
-- **Beständig data** i en namngiven Docker-volym
-- **Healthchecks** för API och databas
-- **Skript för backup och återställning** av databasen
+- **Three services:** `web` (nginx), `api` (Node.js) and `db` (PostgreSQL 16)
+- **Network isolation:** the frontend cannot reach the database; only the API can
+- **Scalable API:** run several API instances with `--scale`, and nginx spreads the traffic
+- **No container runs as root**
+- **Persistent data** in a named Docker volume
+- **Healthchecks** for the API and the database
+- **Backup and restore scripts** for the database
 
-## Arkitektur
+## Architecture
 
 ```
-Internet → web (nginx, :80) → api (Node/Express, skalbar) → db (PostgreSQL)
-           [front]            [front + back]                [back, internal]
+Internet → web (nginx, :80) → api (Node/Express, scalable) → db (PostgreSQL)
+           [front]            [front + back]                 [back, internal]
 ```
 
-| Tjänst | Image | Nätverk | Kör som |
+| Service | Image | Networks | Runs as |
 |---|---|---|---|
-| `web` | `nginxinc/nginx-unprivileged` + statisk frontend | `front` | `nginx` |
+| `web` | `nginxinc/nginx-unprivileged` + static frontend | `front` | `nginx` |
 | `api` | `node:20-alpine` + Express | `front`, `back` | `node` |
 | `db` | `postgres:16-alpine` | `back` | `postgres` |
 
-- Nätverket `back` är `internal`, så databasen har ingen väg ut till internet.
-- Bara `web` publicerar en port (80). API:t och databasen nås bara inifrån Docker.
-- Databasen lagrar sin data i volymen `pgdata`.
+- The `back` network is `internal`, so the database has no route to the internet.
+- Only `web` publishes a port (80). The API and the database are reachable only from inside Docker.
+- The database stores its data in the `pgdata` volume.
 
-## Kom igång
+## Getting started
 
-### Krav
-- [Docker](https://docs.docker.com/get-docker/) med Docker Compose v2
+### Requirements
+- [Docker](https://docs.docker.com/get-docker/) with Docker Compose v2
 
-### Kör lokalt
+### Run locally
 ```bash
 git clone https://github.com/williamellings/containerization.git
 cd containerization
-cp .env.example .env      # ändra värdena, se Konfiguration nedan
+cp .env.example .env      # change the values, see Configuration below
 docker compose up -d --build
 ```
-Öppna http://localhost.
+Open http://localhost.
 
-Stoppa med `docker compose down`. Datan finns kvar i volymen. `docker compose down -v` raderar även databasen.
+Stop with `docker compose down`. Your data stays in the volume. `docker compose down -v` also deletes the database.
 
-## Konfiguration
+## Configuration
 
-Alla inställningar ligger i `.env` (som inte ska committas):
+All settings live in `.env` (do not commit it):
 
-| Variabel | Beskrivning |
+| Variable | Description |
 |---|---|
-| `DOCKERHUB_USER` | Ditt Docker Hub-användarnamn. Används i image-namnen |
-| `POSTGRES_USER` | Databasanvändare |
-| `POSTGRES_PASSWORD` | Databaslösenord. Välj ett eget |
-| `POSTGRES_DB` | Databasens namn |
+| `DOCKERHUB_USER` | Your Docker Hub username. Used in the image names |
+| `POSTGRES_USER` | Database user |
+| `POSTGRES_PASSWORD` | Database password. Choose your own |
+| `POSTGRES_DB` | Database name |
 
 ## API
 
-| Metod | Sökväg | Beskrivning |
+| Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/health` | Status, inklusive databasanslutning |
-| `GET` | `/api/todos` | Lista alla todos |
-| `POST` | `/api/todos` | Skapa en todo. Body: `{ "title": "..." }` |
-| `PATCH` | `/api/todos/:id` | Växla klar/inte klar |
-| `DELETE` | `/api/todos/:id` | Ta bort en todo |
+| `GET` | `/api/health` | Status, including the database connection |
+| `GET` | `/api/todos` | List all todos |
+| `POST` | `/api/todos` | Create a todo. Body: `{ "title": "..." }` |
+| `PATCH` | `/api/todos/:id` | Toggle done/not done |
+| `DELETE` | `/api/todos/:id` | Delete a todo |
 
-Varje svar har headern `X-Served-By` med namnet på API-instansen som svarade.
+Every response has an `X-Served-By` header with the name of the API instance that answered.
 
-## Skalning
+## Scaling
 
 ```bash
 docker compose up -d --scale api=3
 ```
-Nginx använder Dockers inbyggda DNS och fördelar anropen mellan instanserna. Det fungerar eftersom API:t är stateless: all data ligger i databasen.
+Nginx uses Docker's built-in DNS to spread requests across the instances. This works because the API is stateless: all data lives in the database.
 
-## Bygga och publicera images
+## Building and publishing images
 
 ```bash
 docker login
 docker compose build
 docker compose push
 ```
-Det publicerar `<DOCKERHUB_USER>/todo-api:latest` och `<DOCKERHUB_USER>/todo-web:latest`.
+This publishes `<DOCKERHUB_USER>/todo-api:latest` and `<DOCKERHUB_USER>/todo-web:latest`.
 
-## Driftsätta på en server
+## Deploying to a server
 
-Testat på Ubuntu 24.04 i AWS EC2 och Azure VM. Öppna bara port 22 (SSH) och 80 (HTTP) i brandväggen.
+Tested on Ubuntu 24.04 on AWS EC2 and Azure VM. Open only port 22 (SSH) and port 80 (HTTP) in the firewall.
 
 ```bash
-# På servern: installera Docker
+# On the server: install Docker
 curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER     # logga ut och in igen efteråt
+sudo usermod -aG docker $USER     # log out and back in afterwards
 ```
 
-Servern behöver bara `docker-compose.yml` och `.env`, inte källkoden:
+The server only needs `docker-compose.yml` and `.env`, not the source code:
 ```bash
-# Från din dator
-scp docker-compose.yml .env användare@server-ip:~/
+# From your machine
+scp docker-compose.yml .env user@server-ip:~/
 
-# På servern
+# On the server
 docker compose pull
 docker compose up -d --no-build
 ```
 
-Har servern lite minne (till exempel 1 GiB), lägg till swap:
+If the server has little memory (for example 1 GiB), add swap:
 ```bash
 sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
-## Backup och återställning
+## Backup and restore
 
 ```bash
-./scripts/backup.sh                                  # sparar backups/todo-<datum>.sql
+./scripts/backup.sh                                  # saves backups/todo-<date>.sql
 ./scripts/restore.sh backups/todo-20261011-150314.sql
 ```
 
-## Projektstruktur
+## Project structure
 
 ```
 .
-├── api/                  Node.js/Express-API + Dockerfile
-├── web/                  nginx-konfiguration, frontend + Dockerfile
-├── scripts/              backup.sh och restore.sh
+├── api/                  Node.js/Express API + Dockerfile
+├── web/                  nginx config, frontend + Dockerfile
+├── scripts/              backup.sh and restore.sh
 ├── docker-compose.yml
-└── .env.example          mall för .env
+└── .env.example          template for .env
 ```
