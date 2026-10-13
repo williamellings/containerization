@@ -1,72 +1,129 @@
-# Todo – containerized microservice (VG)
+# Todo – containeriserad microservice
+
+En enkel todo-app uppdelad i tre containrar: en nginx-frontend, ett Node.js/Express-API och en PostgreSQL-databas. Allt startas med Docker Compose och kan köras lokalt eller på en molnserver.
+
+## Funktioner
+
+- **Tre tjänster:** `web` (nginx), `api` (Node.js) och `db` (PostgreSQL 16)
+- **Nätverksisolering:** frontenden kan inte nå databasen, utan bara API:t kan det
+- **Skalbart API:** kör flera API-instanser med `--scale`, och nginx fördelar trafiken
+- **Ingen container kör som root**
+- **Beständig data** i en namngiven Docker-volym
+- **Healthchecks** för API och databas
+- **Skript för backup och återställning** av databasen
+
+## Arkitektur
 
 ```
-Internet → web (nginx, :80) → api (Node/Express, skalbar) → db (PostgreSQL + volym pgdata)
+Internet → web (nginx, :80) → api (Node/Express, skalbar) → db (PostgreSQL)
            [front]            [front + back]                [back, internal]
 ```
 
-| Krav | Lösning |
-|---|---|
-| 2 egna images | `api/Dockerfile`, `web/Dockerfile` |
-| Docker Hub | `docker push` (se nedan) |
-| Ingen root | api: `USER node`, web: `nginx-unprivileged`, db: `user: postgres` |
-| 3 containrar + PostgreSQL | web, api, db |
-| Namngiven volym | `pgdata` |
-| Nätverksisolering | `web` är bara på `front`, `db` bara på `back` (internal). web når alltså inte db |
-| Skalning | `docker compose up -d --scale api=3` (nginx lastbalanserar via Docker DNS) |
-| Extra | healthchecks, backup/restore-skript |
+| Tjänst | Image | Nätverk | Kör som |
+|---|---|---|---|
+| `web` | `nginxinc/nginx-unprivileged` + statisk frontend | `front` | `nginx` |
+| `api` | `node:20-alpine` + Express | `front`, `back` | `node` |
+| `db` | `postgres:16-alpine` | `back` | `postgres` |
 
-## 1. Lokalt (kräver Docker Desktop)
+- Nätverket `back` är `internal`, så databasen har ingen väg ut till internet.
+- Bara `web` publicerar en port (80). API:t och databasen nås bara inifrån Docker.
+- Databasen lagrar sin data i volymen `pgdata`.
+
+## Kom igång
+
+### Krav
+- [Docker](https://docs.docker.com/get-docker/) med Docker Compose v2
+
+### Kör lokalt
 ```bash
-cp .env.example .env     # fyll i DOCKERHUB_USER och lösenord
+git clone https://github.com/williamellings/containerization.git
+cd containerization
+cp .env.example .env      # ändra värdena, se Konfiguration nedan
 docker compose up -d --build
-# öppna http://localhost
 ```
+Öppna http://localhost.
 
-## 2. Bygg och pusha till Docker Hub
+Stoppa med `docker compose down`. Datan finns kvar i volymen. `docker compose down -v` raderar även databasen.
+
+## Konfiguration
+
+Alla inställningar ligger i `.env` (som inte ska committas):
+
+| Variabel | Beskrivning |
+|---|---|
+| `DOCKERHUB_USER` | Ditt Docker Hub-användarnamn. Används i image-namnen |
+| `POSTGRES_USER` | Databasanvändare |
+| `POSTGRES_PASSWORD` | Databaslösenord. Välj ett eget |
+| `POSTGRES_DB` | Databasens namn |
+
+## API
+
+| Metod | Sökväg | Beskrivning |
+|---|---|---|
+| `GET` | `/api/health` | Status, inklusive databasanslutning |
+| `GET` | `/api/todos` | Lista alla todos |
+| `POST` | `/api/todos` | Skapa en todo. Body: `{ "title": "..." }` |
+| `PATCH` | `/api/todos/:id` | Växla klar/inte klar |
+| `DELETE` | `/api/todos/:id` | Ta bort en todo |
+
+Varje svar har headern `X-Served-By` med namnet på API-instansen som svarade.
+
+## Skalning
+
+```bash
+docker compose up -d --scale api=3
+```
+Nginx använder Dockers inbyggda DNS och fördelar anropen mellan instanserna. Det fungerar eftersom API:t är stateless: all data ligger i databasen.
+
+## Bygga och publicera images
+
 ```bash
 docker login
 docker compose build
 docker compose push
 ```
-Detta ger `<user>/todo-api:latest` och `<user>/todo-web:latest`.
+Det publicerar `<DOCKERHUB_USER>/todo-api:latest` och `<DOCKERHUB_USER>/todo-web:latest`.
 
-## 3. Driftsätt på AWS EC2 (Ubuntu 24.04, t2/t3.micro)
-Security group: öppna port 22 (SSH) och 80 (HTTP). Port 5432 ska INTE vara öppen.
+## Driftsätta på en server
+
+Testat på Ubuntu 24.04 i AWS EC2 och Azure VM. Öppna bara port 22 (SSH) och 80 (HTTP) i brandväggen.
 
 ```bash
-ssh -i nyckel.pem ubuntu@<EC2-IP>
-
-# Installera Docker + Compose
+# På servern: installera Docker
 curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker ubuntu && exit     # logga in igen
-
-# På servern behövs bara compose-filen och .env (inte källkoden)
-mkdir todo && cd todo
-# kopiera docker-compose.yml och .env hit (scp eller nano)
-docker compose pull
-docker compose up -d
-docker compose ps
+sudo usermod -aG docker $USER     # logga ut och in igen efteråt
 ```
-Öppna `http://<EC2-IP>`.
 
-Obs: på servern bygger du inte, du hämtar images från Docker Hub. Ta gärna bort raderna `build:` ur compose-filen där, eller kör bara `pull` + `up --no-build`.
-
-## 4. VG-demo till screencasten
+Servern behöver bara `docker-compose.yml` och `.env`, inte källkoden:
 ```bash
-docker compose ps                           # 3 containrar, healthy
-docker compose up -d --scale api=3 --no-build
-docker compose ps                           # api-1, api-2, api-3
-curl -si localhost/api/todos | grep -i x-served-by   # kör flera gånger, olika instans
-docker compose exec web sh -c "nc -zv db 5432"       # ska misslyckas (isolering)
-docker compose exec api sh -c "nc -zv db 5432"       # ska lyckas
-docker compose exec api whoami                       # node (inte root)
-docker volume ls                                     # <projekt>_pgdata
-./scripts/backup.sh
-docker compose down && docker compose up -d          # data finns kvar
+# Från din dator
+scp docker-compose.yml .env användare@server-ip:~/
+
+# På servern
+docker compose pull
+docker compose up -d --no-build
 ```
 
-## Screencast-checklista (3–10 min)
-- [ ] Docker Hub: visa en av images
-- [ ] EC2: `docker compose ps` + appen i webbläsaren
-- [ ] VG: nätverk, volym, scale, root-fritt, healthchecks, backup
+Har servern lite minne (till exempel 1 GiB), lägg till swap:
+```bash
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+## Backup och återställning
+
+```bash
+./scripts/backup.sh                                  # sparar backups/todo-<datum>.sql
+./scripts/restore.sh backups/todo-20261011-150314.sql
+```
+
+## Projektstruktur
+
+```
+.
+├── api/                  Node.js/Express-API + Dockerfile
+├── web/                  nginx-konfiguration, frontend + Dockerfile
+├── scripts/              backup.sh och restore.sh
+├── docker-compose.yml
+└── .env.example          mall för .env
+```
